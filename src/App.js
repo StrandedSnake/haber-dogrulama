@@ -1,290 +1,442 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
-import { CheckCircle2, XCircle, AlertCircle, Loader2, Link2, FileText, Play, X } from 'lucide-react';
+import {
+  CheckCircle2, XCircle, AlertCircle, Loader2,
+  Link2, FileText, Play, X, Share2,
+  MessageCircle, History, TrendingUp,
+  ArrowRight, Plus, Trash2, Eye, ChevronDown, ChevronUp, Check
+} from 'lucide-react';
+
+const DURUM_CONFIG = {
+  dogru:     { icon: CheckCircle2, color: '#10b981', label: 'Doğru',    emoji: '✓' },
+  yanlis:    { icon: XCircle,      color: '#ef4444', label: 'Yanlış',   emoji: '✗' },
+  yaniltici: { icon: AlertCircle,  color: '#f97316', label: 'Yanıltıcı', emoji: '⚠' },
+  belirsiz:  { icon: AlertCircle,  color: '#6b7280', label: 'Belirsiz',  emoji: '?' },
+  hata:      { icon: XCircle,      color: '#ef4444', label: 'Hata',     emoji: '⚠' },
+};
 
 export default function HaberDogrulamaSitesi() {
+  const [mod, setMod] = useState('single');
   const [link, setLink] = useState('');
+  const [links, setLinks] = useState(['', '']);
   const [notlar, setNotlar] = useState('');
   const [yukleniyor, setYukleniyor] = useState(false);
   const [sonuc, setSonuc] = useState(null);
-  const [videoKartGoster, setVideoKartGoster] = useState(true);
+  const [sonuclar, setSonuclar] = useState([]);
+  const [gecmis, setGecmis] = useState([]);
+  const [gecmisGoster, setGecmisGoster] = useState(false);
+  const [kopyalandi, setKopyalandi] = useState(false);
 
-  // Video URL'ini buradan değiştirebilirsiniz
-  const videoURL = 'https://www.youtube.com/watch?v=yZVe4VMMaU8';
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(link);
+    setKopyalandi(true);
+    setTimeout(() => setKopyalandi(false), 2000);
+  };
 
-  const haberiKontrolEt = async () => {
-    if (!link.trim()) {
-      alert('Lütfen bir haber linki girin');
-      return;
+  useEffect(() => {
+    loadGecmis();
+  }, []);
+
+  /* ─── Storage (localStorage ile Güncellendi) ─────────── */
+
+  const loadGecmis = () => {
+    try {
+      const veriler = localStorage.getItem('haber_gecmisi');
+      if (veriler) {
+        const items = JSON.parse(veriler);
+        // Tarihe göre sırala (en yeni en üstte)
+        items.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        setGecmis(items.slice(0, 10));
+      }
+    } catch (e) {
+      console.error("Geçmiş yüklenirken hata:", e);
+    }
+  };
+
+  const saveToGecmis = (savedLink, savedSonuc) => {
+    try {
+      const item = {
+        id: Date.now().toString(),
+        link: savedLink,
+        sonuc: savedSonuc,
+        timestamp: new Date().toISOString(),
+      };
+      
+      const mevcutGecmis = JSON.parse(localStorage.getItem('haber_gecmisi') || '[]');
+      const yeniGecmis = [item, ...mevcutGecmis].slice(0, 10); // Sadece son 10 kaydı tut
+      
+      localStorage.setItem('haber_gecmisi', JSON.stringify(yeniGecmis));
+      setGecmis(yeniGecmis);
+    } catch (e) {
+      console.error("Kaydedilirken hata:", e);
+    }
+  };
+
+  const deleteFromGecmis = (id) => {
+    try {
+      const mevcutGecmis = JSON.parse(localStorage.getItem('haber_gecmisi') || '[]');
+      const yeniGecmis = mevcutGecmis.filter(item => item.id !== id);
+      
+      localStorage.setItem('haber_gecmisi', JSON.stringify(yeniGecmis));
+      setGecmis(yeniGecmis);
+    } catch (e) {
+      console.error("Silinirken hata:", e);
+    }
+  };
+
+  /* ─── Helpers ──────────────────────────────────────────── */
+
+  const determineDurum = (text) => {
+    const t = text.toLowerCase();
+    if (t.includes('doğru') && !t.includes('yanlış') && !t.includes('yanıltıcı')) return 'dogru';
+    if (t.includes('yanlış'))   return 'yanlis';
+    if (t.includes('yanıltıcı')) return 'yaniltici';
+    return 'belirsiz';
+  };
+
+  /* SUNUM İÇİN MOCK (SAHTE) API ÇAĞRISI */
+  const callClaude = async (prompt) => {
+    // Sunumda "yapay zeka düşünüyor" hissiyatı vermek için 2 saniyelik bekleme
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Prompt'un içinden linki yakalayalım
+    const urlMatch = prompt.match(/https?:\/\/[^\s]+/);
+    const url = urlMatch ? urlMatch[0].toLowerCase() : "";
+
+    // Hata durumunu göstermek için:
+    if (url.includes("hata")) {
+      throw new Error("Sunucuya bağlanılamadı (Demo Hatası)");
     }
 
+    // Doğru durumunu göstermek için:
+    if (url.includes("dogru")) {
+      return `1. Haberin özeti: İddia edilen olaylar ve veriler gerçeği yansıtmaktadır.
+2. Sonuç: Doğru
+3. Ana bulgular ve kanıtlar: Resmî makamlar ve güvenilir haber ajansları (Reuters, AA) bu durumu olay yerinden doğrulamıştır.
+4. Önemli uyarılar: Metin tamamen objektif verilerle hazırlanmıştır, eksik bilgi bulunmamaktadır.`;
+    } 
+    
+    // Yanlış durumunu göstermek için:
+    else if (url.includes("yanlis")) {
+      return `1. Haberin özeti: Haberde bahsedilen iddialar tamamen kurgusaldır.
+2. Sonuç: Yanlış
+3. Ana bulgular ve kanıtlar: İlgili kurumlar böyle bir durumun olmadığını resmî hesaplarından yalanlamıştır.
+4. Önemli uyarılar: Bu haber halkı paniğe sürüklemek amacıyla üretilmiş bir dezenformasyondur.`;
+    } 
+    
+    // Yanıltıcı durumunu göstermek için:
+    else if (url.includes("yaniltici")) {
+      return `1. Haberin özeti: Olayın yaşandığı doğru olsa da, kullanılan görseller ve bağlam farklıdır.
+2. Sonuç: Yanıltıcı
+3. Ana bulgular ve kanıtlar: Haberdeki video gerçek ancak geçmiş yıllarda farklı bir yerde çekilmiş.
+4. Önemli uyarılar: Okuyucular görselin kaynağına dikkat etmelidir, bağlamdan koparılmış içerik.`;
+    } 
+    
+    // Diğer tüm linkler için Belirsiz dönecek:
+    else {
+      return `1. Haberin özeti: İddialar henüz güvenilir kaynaklarca teyit edilmemiştir.
+2. Sonuç: Belirsiz
+3. Ana bulgular ve kanıtlar: Sadece birkaç anonim sosyal medya hesabı tarafından paylaşılmış, ana akım medyada yer almamıştır.
+4. Önemli uyarılar: Konuyla ilgili yetkililerden resmî bir açıklama beklenmektedir, şu an için kesin bir yargıya varmak güçtür.`;
+    }
+  };
+
+  /* ─── Kontrol işlemleri ────────────────────────────────── */
+
+  const singleCheck = async () => {
+    if (!link.trim()) { alert('Lütfen bir haber linki girin'); return; }
     setYukleniyor(true);
     setSonuc(null);
-
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [
-            {
-              role: 'user',
-              content: `Bu haber linkini kontrol et ve doğruluğunu değerlendir: ${link}
-              
-${notlar ? `Ek Notlar: ${notlar}` : ''}
+      const prompt = `Bu haber linkini kontrol et ve doğruluğunu değerlendir: ${link}
+${notlar ? `Ek Notlar: ${notlar}` : ''}`;
 
-Lütfen şu formatta yanıt ver:
-1. Haberin özeti
-2. Doğruluk değerlendirmesi (Doğru/Yanıltıcı/Yanlış/Belirsiz)
-3. Kanıtlar ve kaynaklar
-4. Önemli detaylar ve uyarılar
-
-Yanıtını Türkçe ver.`
-            }
-          ],
-          tools: [
-            {
-              type: 'web_search_20250305',
-              name: 'web_search'
-            }
-          ]
-        })
-      });
-
-      const data = await response.json();
-      
-      const metinIcerik = data.content
-        .filter(item => item.type === 'text')
-        .map(item => item.text)
-        .join('\n\n');
-
-      let durum = 'belirsiz';
-      const kucukHarf = metinIcerik.toLowerCase();
-      if (kucukHarf.includes('doğru') && !kucukHarf.includes('yanlış')) {
-        durum = 'dogru';
-      } else if (kucukHarf.includes('yanlış') || kucukHarf.includes('yanıltıcı')) {
-        durum = 'yanlis';
-      } else if (kucukHarf.includes('yanıltıcı')) {
-        durum = 'yaniltici';
-      }
-
-      setSonuc({
-        durum,
-        icerik: metinIcerik
-      });
-    } catch (error) {
-      console.error('Hata:', error);
-      setSonuc({
-        durum: 'hata',
-        icerik: 'Haberi kontrol ederken bir hata oluştu. Lütfen tekrar deneyin.'
-      });
+      const metin = await callClaude(prompt);
+      const result = { durum: determineDurum(metin), icerik: metin };
+      setSonuc(result);
+      saveToGecmis(link, result); // Burada await'i kaldırdık çünkü artık localStorage kullanıyoruz
+    } catch {
+      setSonuc({ durum: 'hata', icerik: 'Haberi kontrol ederken bir hata oluştu. Lütfen tekrar deneyin.' });
     } finally {
       setYukleniyor(false);
     }
   };
 
-  const durumRenkleri = {
-    dogru: { icon: CheckCircle2 },
-    yanlis: { icon: XCircle },
-    yaniltici: { icon: AlertCircle },
-    belirsiz: { icon: AlertCircle },
-    hata: { icon: XCircle }
+  const multiCheck = async () => {
+    const validLinks = links.filter(l => l.trim());
+    if (validLinks.length < 2) { alert('Karşılaştırma için en az 2 link girin'); return; }
+    setYukleniyor(true);
+    setSonuclar([]);
+    const results = [];
+    for (const currentLink of validLinks) {
+      try {
+        const prompt = `Bu haber linkini kontrol et: ${currentLink}`;
+        const metin = await callClaude(prompt);
+        results.push({ link: currentLink, durum: determineDurum(metin), icerik: metin });
+      } catch {
+        results.push({ link: currentLink, durum: 'hata', icerik: 'Kontrol edilemedi' });
+      }
+    }
+    setSonuclar(results);
+    setYukleniyor(false);
   };
+
+  const haberiKontrolEt = () => mod === 'single' ? singleCheck() : multiCheck();
+
+  /* ─── Paylaşma ─────────────────────────────────────────── */
+
+  const shareToSocial = (platform) => {
+    if (!sonuc) return;
+    const { emoji, label } = DURUM_CONFIG[sonuc.durum];
+    const text = `Haber Doğrulama Sonucu: ${emoji} ${label}`;
+    const urls = {
+      twitter:   `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link)}`,
+      whatsapp:  `https://wa.me/?text=${encodeURIComponent(`${text} ${link}`)}`,
+    };
+    window.open(urls[platform], '_blank', 'width=600,height=400');
+  };
+
+  /* ─── Compare helpers ──────────────────────────────────── */
+
+  const addLinkField = () => { if (links.length < 5) setLinks([...links, '']); };
+  const updateLink = (i, val) => { const n = [...links]; n[i] = val; setLinks(n); };
+  const removeLink = (i) => { if (links.length > 2) setLinks(links.filter((_, idx) => idx !== i)); };
+
+  const isSubmitDisabled = yukleniyor || (
+    mod === 'single' ? !link.trim() : links.filter(l => l.trim()).length < 2
+  );
+
+  /* ─── Render ────────────────────────────────────────────── */
 
   return (
     <div className="container">
-      {/* Grid pattern arka plan */}
-      <div className="background-grid">
-        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(147, 197, 253, 0.1)" strokeWidth="0.5"/>
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-        </svg>
-      </div>
+      <div className="bg-pattern" />
+      <div className="bg-gradient" />
 
-      {/* Diagonal lines */}
-      <div className="background-diagonals">
-        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="diagonals" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-              <line x1="0" y1="0" x2="0" y2="20" stroke="rgba(147, 197, 253, 0.3)" strokeWidth="0.5"/>
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#diagonals)" />
-        </svg>
-      </div>
+      <div className="content">
 
-      {/* Floating Video Card */}
-      {videoKartGoster && (
-        <div className="video-card">
-          <div className="video-card-wrapper">
-            {/* Kapatma butonu */}
-            <button
-              onClick={() => setVideoKartGoster(false)}
-              className="video-close-btn"
-            >
-              <X className="icon-sm" />
-            </button>
-
-            {/* Video önizleme */}
-            <a
-              href={videoURL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="video-link"
-            >
-              {/* Thumbnail */}
-              <div className="video-thumbnail">
-                <div className="video-text">
-                  <h3 className="video-title">GERİZEKALI</h3>
-                  <h3 className="video-title">MIYIZ?</h3>
-                </div>
-                
-                {/* Play butonu overlay */}
-                <div className="video-overlay">
-                  <div className="play-button">
-                    <Play className="play-icon" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Alt metin */}
-              <div className="video-footer">
-                <p className="video-footer-text">🎬 Videoyu İzle</p>
-              </div>
-            </a>
-
-            {/* Pulse animasyonu */}
-            <div className="video-pulse"></div>
-          </div>
-        </div>
-      )}
-
-      <div className="content-wrapper">
-        {/* Header */}
+        {/* ── Header ── */}
         <header className="header">
-          <h1 className="main-title">Gerizekalı mıyız?</h1>
-          <p className="subtitle">
-            Yapay zeka destekli haber doğrulama sistemi ile haberlerin doğruluğunu kontrol edin
-          </p>
-          <div className="header-divider">
-            <div className="divider-line"></div>
-            <span className="divider-text">AI-Powered Fact Checking</span>
-            <div className="divider-line"></div>
+          <div className="header-badge">DOĞRULUK KONTROLÜ SİSTEMİ</div>
+          <h1 className="main-title">Yalan mıyız?</h1>
+          <p className="subtitle">Haberleri sürükleyin, yapıştırın veya karşılaştırın. Dezenformasyonla mücadele için yapay zeka desteği.</p>
+
+          <div className="mode-toggle">
+            <button className={`mode-btn ${mod === 'single' ? 'active' : ''}`} onClick={() => setMod('single')}>
+              <Link2 size={18} /> Tekli Kontrol
+            </button>
+            <button className={`mode-btn ${mod === 'compare' ? 'active' : ''}`} onClick={() => setMod('compare')}>
+              <TrendingUp size={18} /> Karşılaştır
+            </button>
+            <button className={`mode-btn ${gecmisGoster ? 'active' : ''}`} onClick={() => setGecmisGoster(!gecmisGoster)}>
+              <History size={18} /> Geçmiş <span className="gecmis-badge">{gecmis.length}</span>
+            </button>
           </div>
         </header>
 
-        {/* Form Kartı */}
-        <div className="form-card">
-          <div className="form-content">
-            {/* Link Input */}
-            <div className="input-group">
-              <label className="input-label">
-                <Link2 className="label-icon" />
-                Haber Linki
-              </label>
-              <input
-                type="url"
-                value={link}
-                onChange={(e) => setLink(e.target.value)}
-                placeholder="https://www.ornek-haber.com/haber-basligi"
-                className="input-field"
-                disabled={yukleniyor}
-              />
+        {/* ── Geçmiş ── */}
+        {gecmisGoster && (
+          <div className="history-panel">
+            <div className="history-header">
+              <h3 className="history-title">Son Kontroller</h3>
+              <button className="history-close-btn" onClick={() => setGecmisGoster(false)}>
+                <ChevronUp size={20} />
+              </button>
             </div>
-
-            {/* Notlar Input */}
-            <div className="input-group">
-              <label className="input-label">
-                <FileText className="label-icon" />
-                Ek Notlar (Opsiyonel)
-              </label>
-              <textarea
-                value={notlar}
-                onChange={(e) => setNotlar(e.target.value)}
-                placeholder="Kontrol edilmesini istediğiniz özel noktalar veya bağlam ekleyin..."
-                rows="4"
-                className="textarea-field"
-                disabled={yukleniyor}
-              />
-            </div>
-
-            {/* Kontrol Butonu */}
-            <button
-              onClick={haberiKontrolEt}
-              disabled={yukleniyor || !link.trim()}
-              className={`submit-button ${yukleniyor || !link.trim() ? 'disabled' : ''}`}
-            >
-              {yukleniyor ? (
-                <>
-                  <Loader2 className="button-icon spinning" />
-                  Kontrol Ediliyor...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="button-icon" />
-                  Haberi Kontrol Et
-                </>
-              )}
-            </button>
+            {gecmis.length === 0 ? (
+              <p className="history-empty">Henüz kontrol edilmiş haber yok</p>
+            ) : (
+              <div className="history-list">
+                {gecmis.map((item) => (
+                  <div key={item.id} className="history-item">
+                    <div className="history-item-header">
+                      <div
+                        className="history-badge"
+                        style={{ background: DURUM_CONFIG[item.sonuc.durum].color }}
+                      >
+                        {DURUM_CONFIG[item.sonuc.durum].emoji}
+                      </div>
+                      <div className="history-item-info">
+                        <p className="history-item-link">{item.link.slice(0, 50)}…</p>
+                        <p className="history-item-time">
+                          {new Date(item.timestamp).toLocaleDateString('tr-TR')}
+                        </p>
+                      </div>
+                      <div className="history-item-actions">
+                        <button
+                          className="history-action-btn"
+                          title="Görüntüle"
+                          onClick={() => { setLink(item.link); setSonuc(item.sonuc); setMod('single'); setGecmisGoster(false); }}
+                        >
+                          <Eye size={16} />
+                        </button>
+                        <button
+                          className="history-action-btn"
+                          title="Sil"
+                          onClick={() => deleteFromGecmis(item.id)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+        )}
+
+        {/* ── Form ── */}
+        <div className="form-card">
+          {mod === 'single' ? (
+            <>
+              <div className="input-group">
+                <label className="input-label">
+                  <Link2 size={20} /> Haber Linki
+                </label>
+                <input
+                  type="url"
+                  className="input-field"
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  placeholder="https://www.ornek-haber.com/haber-basligi"
+                  disabled={yukleniyor}
+                />
+              </div>
+              <div className="input-group">
+                <label className="input-label">
+                  <FileText size={20} /> Ek Notlar <span className="input-label-opt">(Opsiyonel)</span>
+                </label>
+                <textarea
+                  className="textarea-field"
+                  value={notlar}
+                  onChange={(e) => setNotlar(e.target.value)}
+                  placeholder="Kontrol edilmesini istediğiniz özel noktalar..."
+                  rows="3"
+                  disabled={yukleniyor}
+                />
+              </div>
+            </>
+          ) : (
+            <div>
+              <p className="compare-label">Karşılaştırmak istediğiniz haber linklerini girin:</p>
+              {links.map((l, i) => (
+                <div key={i} className="compare-link-group">
+                  <span className="compare-link-number">{i + 1}</span>
+                  <input
+                    type="url"
+                    className="compare-input"
+                    value={l}
+                    onChange={(e) => updateLink(i, e.target.value)}
+                    placeholder="https://www.ornek-haber.com/haber-basligi"
+                    disabled={yukleniyor}
+                  />
+                  {links.length > 2 && (
+                    <button className="remove-btn" onClick={() => removeLink(i)} disabled={yukleniyor}>
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {links.length < 5 && (
+                <button className="add-link-btn" onClick={addLinkField} disabled={yukleniyor}>
+                  <Plus size={18} /> Kaynak Ekle
+                </button>
+              )}
+            </div>
+          )}
+
+          <button className="submit-btn" onClick={haberiKontrolEt} disabled={isSubmitDisabled}>
+            {yukleniyor ? (
+              <div className="loading-content"><Loader2 size={20} className="spinning" /> <span className="loading-text">Analiz Ediliyor...</span></div>
+            ) : (
+              <><CheckCircle2 size={20} /> {mod === 'single' ? 'DOĞRULUĞU ANALİZ ET' : 'KAYNAKLARI KARŞILAŞTIR'}</>
+            )}
+          </button>
         </div>
 
-        {/* Sonuç Kartı */}
-        {sonuc && (
-          <div className="result-card">
-            <div className="result-header">
-              {(() => {
-                const DurumIcon = durumRenkleri[sonuc.durum].icon;
-                return (
-                  <div className={`result-icon result-icon-${sonuc.durum}`}>
-                    <DurumIcon className="icon-lg" />
+        {/* ── Tekli Sonuç ── */}
+        {mod === 'single' && sonuc && (() => {
+          const cfg = DURUM_CONFIG[sonuc.durum];
+          const Icon = cfg.icon;
+          return (
+            <div className="result-card">
+              <div className="result-header">
+                <div className={`result-icon ${sonuc.durum}`}>
+                  <Icon size={32} color="currentColor" />
+                </div>
+                <div className="result-title-wrapper">
+                  <h2 className="result-title">Doğrulama Sonucu</h2>
+                  <div className={`result-badge ${sonuc.durum}`}>
+                    {cfg.emoji} {cfg.label}
                   </div>
-                );
-              })()}
-              <div className="result-title-wrapper">
-                <h2 className="result-title">Doğrulama Sonucu</h2>
-                <div className={`result-badge result-badge-${sonuc.durum}`}>
-                  {sonuc.durum === 'dogru' && '✓ Doğru'}
-                  {sonuc.durum === 'yanlis' && '✗ Yanlış'}
-                  {sonuc.durum === 'yaniltici' && '⚠ Yanıltıcı'}
-                  {sonuc.durum === 'belirsiz' && '? Belirsiz'}
-                  {sonuc.durum === 'hata' && '⚠ Hata'}
                 </div>
               </div>
-            </div>
 
-            <div className="result-content">
-              <div className="result-text">
-                {sonuc.icerik}
+              <div className="result-content">
+                <div className="result-text">{sonuc.icerik}</div>
               </div>
-            </div>video-thumbnail
 
-            {/* Yeni Kontrol Butonu */}
-            <button
-              onClick={() => {
-                setSonuc(null);
-                setLink('');
-                setNotlar('');
-              }}
-              className="reset-button"
-            >
-              Yeni Haber Kontrol Et
+              {/* Paylaşım Butonları */}
+              <div className="share-actions">
+                <button className="share-btn x-btn" onClick={() => shareToSocial('twitter')}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 22.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                  </svg>
+                  X'te Paylaş
+                </button>
+                <button className="share-btn wa-btn" onClick={() => shareToSocial('whatsapp')}>
+                  <MessageCircle size={16} /> WhatsApp
+                </button>
+                <button className="share-btn copy-link-btn" onClick={copyToClipboard}>
+                  {kopyalandi ? <Check size={16} color="#10b981" /> : <Link2 size={16} />}
+                  {kopyalandi ? 'Kopyalandı' : 'Bağlantıyı Kopyala'}
+                </button>
+              </div>
+
+              <button className="reset-btn" onClick={() => { setSonuc(null); setLink(''); setNotlar(''); }}>
+                Yeni Haber Kontrol Et
+              </button>
+            </div>
+          );
+        })()}
+
+        {/* ── Karşılaştırma Sonuçları ── */}
+        {mod === 'compare' && sonuclar.length > 0 && (
+          <div className="compare-results">
+            <h2 className="compare-results-title">Karşılaştırma Sonuçları</h2>
+            <div className="compare-grid">
+              {sonuclar.map((result, i) => {
+                const cfg = DURUM_CONFIG[result.durum];
+                return (
+                  <div key={i} className="compare-card">
+                    <div className="compare-card-header">
+                      <div className="compare-card-badge" style={{ background: cfg.color }}>
+                        {cfg.emoji}
+                      </div>
+                      <div>
+                        <span className="compare-card-number">Kaynak {i + 1}</span>
+                        <div className="compare-card-verdict" style={{ color: cfg.color }}>{cfg.label}</div>
+                      </div>
+                    </div>
+                    <p className="compare-card-link" title={result.link}>{result.link}</p>
+                    <div className="compare-card-content">{result.icerik}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="reset-btn" onClick={() => { setSonuclar([]); setLinks(['', '']); }}>
+              Yeni Karşılaştırma Yap
             </button>
           </div>
         )}
 
-        {/* Footer */}
+        {/* ── Footer ── */}
         <footer className="footer">
-          <p>Yapay zeka destekli haber doğrulama</p>
+          <p>Yapay zeka destekli haber doğrulama sistemi</p>
+          <p className="footer-small">v1.0.0 (Demo Mode)</p>
         </footer>
+
       </div>
     </div>
   );
