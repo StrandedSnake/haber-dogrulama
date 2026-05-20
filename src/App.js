@@ -1,212 +1,341 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
-import {
-  CheckCircle2, XCircle, AlertCircle, Loader2,
-  Link2, FileText, Play, X, Share2,
-  MessageCircle, History, TrendingUp,
-  ArrowRight, Plus, Trash2, Eye, ChevronDown, ChevronUp, Check
-} from 'lucide-react';
+
+// ─── Sabitler ───────────────────────────────────────────────────────────────
 
 const DURUM_CONFIG = {
-  dogru:     { icon: CheckCircle2, color: '#10b981', label: 'Doğru',    emoji: '✓' },
-  yanlis:    { icon: XCircle,      color: '#ef4444', label: 'Yanlış',   emoji: '✗' },
-  yaniltici: { icon: AlertCircle,  color: '#f97316', label: 'Yanıltıcı', emoji: '⚠' },
-  belirsiz:  { icon: AlertCircle,  color: '#6b7280', label: 'Belirsiz',  emoji: '?' },
-  hata:      { icon: XCircle,      color: '#ef4444', label: 'Hata',     emoji: '⚠' },
+  dogru:     { color: '#10b981', label: 'Doğru',     emoji: '✓' },
+  yanlis:    { color: '#ef4444', label: 'Yanlış',    emoji: '✗' },
+  yaniltici: { color: '#f97316', label: 'Yanıltıcı', emoji: '⚠' },
+  belirsiz:  { color: '#6b7280', label: 'Belirsiz',  emoji: '?' },
+  hata:      { color: '#ef4444', label: 'Hata',      emoji: '⚠' },
 };
 
-export default function HaberDogrulamaSitesi() {
-  const [mod, setMod] = useState('single');
+const LANG_PROMPTS = {
+  tr: (url, notlar, depth) => `Sen bir haber ve bilimsel makale doğrulama uzmanısın. Verilen içeriği analiz et ve YALNIZCA şu formatta yanıt ver:
+
+1. İçeriğin özeti:
+[2-3 cümlelik kısa özet]
+
+2. Sonuç: [Doğru / Yanlış / Yanıltıcı / Belirsiz]
+
+3. Ana bulgular ve kanıtlar:
+[Madde madde bulgular]
+
+4. Önemli uyarılar:
+[Okuyucunun dikkat etmesi gerekenler]
+${depth === 'deep' ? `
+5. Kaynak önerileri:
+[Doğrulama için başvurulabilecek güvenilir kaynaklar]
+
+6. Bağlam ve geçmiş:
+[Konuyla ilgili daha geniş bağlam]` : ''}
+
+Analiz edilecek içerik: ${url}
+${notlar ? `Ek notlar: ${notlar}` : ''}`,
+
+  en: (url, notlar, depth) => `You are a fact-checking expert specializing in news and scientific articles. Analyze the given content and respond ONLY in this format:
+
+1. Content summary:
+[2-3 sentence summary]
+
+2. Verdict: [True / False / Misleading / Uncertain]
+
+3. Key findings and evidence:
+[Bullet points]
+
+4. Important caveats:
+[What readers should watch out for]
+${depth === 'deep' ? `
+5. Source recommendations:
+[Reliable sources for verification]
+
+6. Context and background:
+[Broader context]` : ''}
+
+Content to analyze: ${url}
+${notlar ? `Additional notes: ${notlar}` : ''}`,
+
+  ar: (url, notlar, depth) => `أنت خبير في التحقق من الأخبار والمقالات العلمية. حلل المحتوى المعطى وأجب فقط بهذا التنسيق:
+
+1. ملخص المحتوى:
+[ملخص بجملتين أو ثلاث]
+
+2. الحكم: [صحيح / خاطئ / مضلل / غير مؤكد]
+
+3. النتائج والأدلة الرئيسية:
+[نقاط]
+
+4. تحذيرات مهمة:
+[ما يجب على القراء الانتباه إليه]
+
+المحتوى للتحليل: ${url}
+${notlar ? `ملاحظات إضافية: ${notlar}` : ''}`,
+};
+
+// ─── Demo Yanıtları (API key yokken) ────────────────────────────────────────
+
+const getDemoResponse = (url) => {
+  const u = url.toLowerCase();
+  if (u.includes('dogru'))
+    return `1. İçeriğin özeti:\nVerilen içerik güvenilir kaynaklarca doğrulanmış bilgiler içermektedir.\n\n2. Sonuç: Doğru\n\n3. Ana bulgular ve kanıtlar:\n• Resmî makamlar olayı doğrulamıştır\n• Reuters ve AA haberi teyit etmiştir\n• Birden fazla bağımsız kaynak uyuşmaktadır\n\n4. Önemli uyarılar:\nİçerik güncel ve tarafsız kaynaklardan alınmıştır.`;
+  if (u.includes('yanlis'))
+    return `1. İçeriğin özeti:\nHaberde yer alan iddialar doğrulanamamış ya da yanlış olduğu kanıtlanmıştır.\n\n2. Sonuç: Yanlış\n\n3. Ana bulgular ve kanıtlar:\n• İlgili kurumlar resmi olarak yalanlamıştır\n• Birincil kaynak bulunamadı\n• Yanlış bağlamda kullanılan görsel saptandı\n\n4. Önemli uyarılar:\nBu tür içerikleri paylaşmadan önce birden fazla kaynakla teyit edin.`;
+  if (u.includes('yaniltici'))
+    return `1. İçeriğin özeti:\nOlay gerçek olsa da sunuş biçimi okuyucuyu yanıltmaktadır.\n\n2. Sonuç: Yanıltıcı\n\n3. Ana bulgular ve kanıtlar:\n• Kullanılan görsel farklı bir tarihten alınmış\n• Bağlamdan kopuk istatistik kullanılmış\n• Eksik bilgiyle yanlış çıkarım yaptırılıyor\n\n4. Önemli uyarılar:\nOrijinal kaynağı ve tam bağlamı araştırın.`;
+  return `1. İçeriğin özeti:\nVerilen içerik henüz güvenilir kaynaklarca teyit edilmemiştir.\n\n2. Sonuç: Belirsiz\n\n3. Ana bulgular ve kanıtlar:\n• Yalnızca sosyal medyada yer almaktadır\n• Ana akım medyada haber yok\n• Resmi açıklama bekleniyor\n\n4. Önemli uyarılar:\nKesin bir kanaat bildirmek için yeterli veri bulunmamaktadır.`;
+};
+
+// ─── API ─────────────────────────────────────────────────────────────────────
+
+const callClaude = async (prompt, apiKey, model) => {
+  if (!apiKey || !apiKey.startsWith('sk-ant')) {
+    await new Promise((r) => setTimeout(r, 2000)); // demo gecikme
+    return getDemoResponse(prompt);
+  }
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: model || 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `API hatası: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.content?.[0]?.text || 'Yanıt alınamadı.';
+};
+
+// ─── Yardımcılar ─────────────────────────────────────────────────────────────
+
+const determineDurum = (text) => {
+  const t = text.toLowerCase();
+  if (
+    (t.includes('doğru') || t.includes('true') || t.includes('صحيح')) &&
+    !t.includes('yanlış') && !t.includes('yanıltıcı') &&
+    !t.includes('false') && !t.includes('misleading')
+  ) return 'dogru';
+  if (t.includes('yanlış') || t.includes('false') || t.includes('خاطئ')) return 'yanlis';
+  if (t.includes('yanıltıcı') || t.includes('misleading') || t.includes('مضلل')) return 'yaniltici';
+  return 'belirsiz';
+};
+
+const loadSettings = () => {
+  try { return JSON.parse(localStorage.getItem('yd_settings') || '{}'); }
+  catch { return {}; }
+};
+
+const saveSettings = (s) => {
+  localStorage.setItem('yd_settings', JSON.stringify(s));
+};
+
+const loadGecmisFromStorage = () => {
+  try { return JSON.parse(localStorage.getItem('haber_gecmisi') || '[]'); }
+  catch { return []; }
+};
+
+// ─── Ana Bileşen ──────────────────────────────────────────────────────────────
+
+export default function App() {
+  // Mod
+  const [mod, setModState] = useState('single');
+
+  // Form
   const [link, setLink] = useState('');
-  const [links, setLinks] = useState(['', '']);
   const [notlar, setNotlar] = useState('');
+  const [compareLinks, setCompareLinks] = useState(['', '']);
+
+  // Sonuçlar
   const [yukleniyor, setYukleniyor] = useState(false);
   const [sonuc, setSonuc] = useState(null);
-  const [sonuclar, setSonuclar] = useState([]);
+  const [compareResults, setCompareResults] = useState([]);
+
+  // Paneller
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gecmisOpen, setGecmisOpen] = useState(false);
+
+  // Geçmiş
   const [gecmis, setGecmis] = useState([]);
-  const [gecmisGoster, setGecmisGoster] = useState(false);
+
+  // Ayarlar state'leri
+  const [apiKey, setApiKey] = useState('');
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [model, setModel] = useState('claude-sonnet-4-20250514');
+  const [lang, setLang] = useState('tr');
+  const [depth, setDepth] = useState('normal');
+  const [accent, setAccent] = useState('#dc2626');
+  const [siteTitle, setSiteTitle] = useState('Yalan mıyız?');
+  const [badgeText, setBadgeText] = useState('DOĞRULUK KONTROLÜ SİSTEMİ');
+  const [font, setFont] = useState('Georgia, serif');
+
+  // Kaydet bildirimi
+  const [saveConfirm, setSaveConfirm] = useState(false);
+
+  // Kopyalandı
   const [kopyalandi, setKopyalandi] = useState(false);
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(link);
-    setKopyalandi(true);
-    setTimeout(() => setKopyalandi(false), 2000);
-  };
+  // ─── İlk yükleme ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    loadGecmis();
+    const s = loadSettings();
+    if (s.apiKey)    setApiKey(s.apiKey);
+    if (s.model)     setModel(s.model);
+    if (s.lang)      setLang(s.lang);
+    if (s.depth)     setDepth(s.depth);
+    if (s.accent)    setAccent(s.accent);
+    if (s.siteTitle) setSiteTitle(s.siteTitle);
+    if (s.badgeText) setBadgeText(s.badgeText);
+    if (s.font)      setFont(s.font);
+    setGecmis(loadGecmisFromStorage());
   }, []);
 
-  /* ─── Storage (localStorage ile Güncellendi) ─────────── */
+  // Dinamik vurgu rengi CSS değişkeni
+  useEffect(() => {
+    document.documentElement.style.setProperty('--accent', accent);
+    const dark = accent + '22';
+    document.documentElement.style.setProperty('--accent-dim', dark);
+  }, [accent]);
 
-  const loadGecmis = () => {
-    try {
-      const veriler = localStorage.getItem('haber_gecmisi');
-      if (veriler) {
-        const items = JSON.parse(veriler);
-        // Tarihe göre sırala (en yeni en üstte)
-        items.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        setGecmis(items.slice(0, 10));
-      }
-    } catch (e) {
-      console.error("Geçmiş yüklenirken hata:", e);
-    }
+  // Yazı tipi
+  useEffect(() => {
+    document.body.style.fontFamily = font;
+  }, [font]);
+
+  // ─── Ayarlar kaydet ────────────────────────────────────────────────────────
+
+  const handleSaveSettings = () => {
+    saveSettings({ apiKey, model, lang, depth, accent, siteTitle, badgeText, font });
+    setSaveConfirm(true);
+    setTimeout(() => setSaveConfirm(false), 2000);
   };
 
+  const handleResetSettings = () => {
+    if (!window.confirm('Tüm ayarlar sıfırlanacak. Emin misiniz?')) return;
+    localStorage.removeItem('yd_settings');
+    window.location.reload();
+  };
+
+  // ─── Geçmiş ────────────────────────────────────────────────────────────────
+
   const saveToGecmis = (savedLink, savedSonuc) => {
-    try {
-      const item = {
-        id: Date.now().toString(),
-        link: savedLink,
-        sonuc: savedSonuc,
-        timestamp: new Date().toISOString(),
-      };
-      
-      const mevcutGecmis = JSON.parse(localStorage.getItem('haber_gecmisi') || '[]');
-      const yeniGecmis = [item, ...mevcutGecmis].slice(0, 10); // Sadece son 10 kaydı tut
-      
-      localStorage.setItem('haber_gecmisi', JSON.stringify(yeniGecmis));
-      setGecmis(yeniGecmis);
-    } catch (e) {
-      console.error("Kaydedilirken hata:", e);
-    }
+    const item = {
+      id: Date.now().toString(),
+      link: savedLink,
+      sonuc: savedSonuc,
+      timestamp: new Date().toISOString(),
+    };
+    const updated = [item, ...loadGecmisFromStorage()].slice(0, 10);
+    localStorage.setItem('haber_gecmisi', JSON.stringify(updated));
+    setGecmis(updated);
   };
 
   const deleteFromGecmis = (id) => {
-    try {
-      const mevcutGecmis = JSON.parse(localStorage.getItem('haber_gecmisi') || '[]');
-      const yeniGecmis = mevcutGecmis.filter(item => item.id !== id);
-      
-      localStorage.setItem('haber_gecmisi', JSON.stringify(yeniGecmis));
-      setGecmis(yeniGecmis);
-    } catch (e) {
-      console.error("Silinirken hata:", e);
-    }
+    const updated = loadGecmisFromStorage().filter((i) => i.id !== id);
+    localStorage.setItem('haber_gecmisi', JSON.stringify(updated));
+    setGecmis(updated);
   };
 
-  /* ─── Helpers ──────────────────────────────────────────── */
-
-  const determineDurum = (text) => {
-    const t = text.toLowerCase();
-    if (t.includes('doğru') && !t.includes('yanlış') && !t.includes('yanıltıcı')) return 'dogru';
-    if (t.includes('yanlış'))   return 'yanlis';
-    if (t.includes('yanıltıcı')) return 'yaniltici';
-    return 'belirsiz';
+  const loadFromGecmis = (item) => {
+    setModState('single');
+    setLink(item.link);
+    setSonuc(item.sonuc);
+    setGecmisOpen(false);
   };
 
-  /* SUNUM İÇİN MOCK (SAHTE) API ÇAĞRISI */
-  const callClaude = async (prompt) => {
-    // Sunumda "yapay zeka düşünüyor" hissiyatı vermek için 2 saniyelik bekleme
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Prompt'un içinden linki yakalayalım
-    const urlMatch = prompt.match(/https?:\/\/[^\s]+/);
-    const url = urlMatch ? urlMatch[0].toLowerCase() : "";
-
-    // Hata durumunu göstermek için:
-    if (url.includes("hata")) {
-      throw new Error("Sunucuya bağlanılamadı (Demo Hatası)");
-    }
-
-    // Doğru durumunu göstermek için:
-    if (url.includes("dogru")) {
-      return `1. Haberin özeti: İddia edilen olaylar ve veriler gerçeği yansıtmaktadır.
-2. Sonuç: Doğru
-3. Ana bulgular ve kanıtlar: Resmî makamlar ve güvenilir haber ajansları (Reuters, AA) bu durumu olay yerinden doğrulamıştır.
-4. Önemli uyarılar: Metin tamamen objektif verilerle hazırlanmıştır, eksik bilgi bulunmamaktadır.`;
-    } 
-    
-    // Yanlış durumunu göstermek için:
-    else if (url.includes("yanlis")) {
-      return `1. Haberin özeti: Haberde bahsedilen iddialar tamamen kurgusaldır.
-2. Sonuç: Yanlış
-3. Ana bulgular ve kanıtlar: İlgili kurumlar böyle bir durumun olmadığını resmî hesaplarından yalanlamıştır.
-4. Önemli uyarılar: Bu haber halkı paniğe sürüklemek amacıyla üretilmiş bir dezenformasyondur.`;
-    } 
-    
-    // Yanıltıcı durumunu göstermek için:
-    else if (url.includes("yaniltici")) {
-      return `1. Haberin özeti: Olayın yaşandığı doğru olsa da, kullanılan görseller ve bağlam farklıdır.
-2. Sonuç: Yanıltıcı
-3. Ana bulgular ve kanıtlar: Haberdeki video gerçek ancak geçmiş yıllarda farklı bir yerde çekilmiş.
-4. Önemli uyarılar: Okuyucular görselin kaynağına dikkat etmelidir, bağlamdan koparılmış içerik.`;
-    } 
-    
-    // Diğer tüm linkler için Belirsiz dönecek:
-    else {
-      return `1. Haberin özeti: İddialar henüz güvenilir kaynaklarca teyit edilmemiştir.
-2. Sonuç: Belirsiz
-3. Ana bulgular ve kanıtlar: Sadece birkaç anonim sosyal medya hesabı tarafından paylaşılmış, ana akım medyada yer almamıştır.
-4. Önemli uyarılar: Konuyla ilgili yetkililerden resmî bir açıklama beklenmektedir, şu an için kesin bir yargıya varmak güçtür.`;
-    }
-  };
-
-  /* ─── Kontrol işlemleri ────────────────────────────────── */
+  // ─── Kontroller ────────────────────────────────────────────────────────────
 
   const singleCheck = async () => {
-    if (!link.trim()) { alert('Lütfen bir haber linki girin'); return; }
+    if (!link.trim()) { alert('Lütfen bir link girin'); return; }
     setYukleniyor(true);
     setSonuc(null);
     try {
-      const prompt = `Bu haber linkini kontrol et ve doğruluğunu değerlendir: ${link}
-${notlar ? `Ek Notlar: ${notlar}` : ''}`;
-
-      const metin = await callClaude(prompt);
+      const prompt = LANG_PROMPTS[lang](link, notlar, depth);
+      const metin = await callClaude(prompt, apiKey, model);
       const result = { durum: determineDurum(metin), icerik: metin };
       setSonuc(result);
-      saveToGecmis(link, result); // Burada await'i kaldırdık çünkü artık localStorage kullanıyoruz
-    } catch {
-      setSonuc({ durum: 'hata', icerik: 'Haberi kontrol ederken bir hata oluştu. Lütfen tekrar deneyin.' });
+      saveToGecmis(link, result);
+    } catch (e) {
+      setSonuc({ durum: 'hata', icerik: `Hata: ${e.message}` });
     } finally {
       setYukleniyor(false);
     }
   };
 
   const multiCheck = async () => {
-    const validLinks = links.filter(l => l.trim());
-    if (validLinks.length < 2) { alert('Karşılaştırma için en az 2 link girin'); return; }
+    const validLinks = compareLinks.filter((l) => l.trim());
+    if (validLinks.length < 2) { alert('En az 2 link girin'); return; }
     setYukleniyor(true);
-    setSonuclar([]);
+    setCompareResults([]);
     const results = [];
     for (const currentLink of validLinks) {
       try {
-        const prompt = `Bu haber linkini kontrol et: ${currentLink}`;
-        const metin = await callClaude(prompt);
+        const prompt = LANG_PROMPTS[lang](currentLink, '', depth);
+        const metin = await callClaude(prompt, apiKey, model);
         results.push({ link: currentLink, durum: determineDurum(metin), icerik: metin });
-      } catch {
-        results.push({ link: currentLink, durum: 'hata', icerik: 'Kontrol edilemedi' });
+      } catch (e) {
+        results.push({ link: currentLink, durum: 'hata', icerik: `Hata: ${e.message}` });
       }
     }
-    setSonuclar(results);
+    setCompareResults(results);
     setYukleniyor(false);
   };
 
-  const haberiKontrolEt = () => mod === 'single' ? singleCheck() : multiCheck();
+  const haberiKontrolEt = () => (mod === 'single' ? singleCheck() : multiCheck());
 
-  /* ─── Paylaşma ─────────────────────────────────────────── */
+  // ─── Karşılaştırma link yönetimi ──────────────────────────────────────────
+
+  const addLinkField = () => {
+    if (compareLinks.length < 5) setCompareLinks([...compareLinks, '']);
+  };
+
+  const updateCompareLink = (i, val) => {
+    const updated = [...compareLinks];
+    updated[i] = val;
+    setCompareLinks(updated);
+  };
+
+  const removeCompareLink = (i) => {
+    if (compareLinks.length > 2) setCompareLinks(compareLinks.filter((_, idx) => idx !== i));
+  };
+
+  // ─── Paylaş / Kopyala ─────────────────────────────────────────────────────
 
   const shareToSocial = (platform) => {
     if (!sonuc) return;
     const { emoji, label } = DURUM_CONFIG[sonuc.durum];
     const text = `Haber Doğrulama Sonucu: ${emoji} ${label}`;
     const urls = {
-      twitter:   `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link)}`,
-      whatsapp:  `https://wa.me/?text=${encodeURIComponent(`${text} ${link}`)}`,
+      twitter:  `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link)}`,
+      whatsapp: `https://wa.me/?text=${encodeURIComponent(`${text} ${link}`)}`,
     };
     window.open(urls[platform], '_blank', 'width=600,height=400');
   };
 
-  /* ─── Compare helpers ──────────────────────────────────── */
+  const copyLink = () => {
+    navigator.clipboard.writeText(link);
+    setKopyalandi(true);
+    setTimeout(() => setKopyalandi(false), 2000);
+  };
 
-  const addLinkField = () => { if (links.length < 5) setLinks([...links, '']); };
-  const updateLink = (i, val) => { const n = [...links]; n[i] = val; setLinks(n); };
-  const removeLink = (i) => { if (links.length > 2) setLinks(links.filter((_, idx) => idx !== i)); };
+  // ─── Yardımcı değerler ────────────────────────────────────────────────────
 
-  const isSubmitDisabled = yukleniyor || (
-    mod === 'single' ? !link.trim() : links.filter(l => l.trim()).length < 2
-  );
+  const isApiActive = apiKey && apiKey.startsWith('sk-ant');
+  const isSubmitDisabled =
+    yukleniyor ||
+    (mod === 'single' ? !link.trim() : compareLinks.filter((l) => l.trim()).length < 2);
 
-  /* ─── Render ────────────────────────────────────────────── */
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="container">
@@ -217,66 +346,184 @@ ${notlar ? `Ek Notlar: ${notlar}` : ''}`;
 
         {/* ── Header ── */}
         <header className="header">
-          <div className="header-badge">DOĞRULUK KONTROLÜ SİSTEMİ</div>
-          <h1 className="main-title">Yalan mıyız?</h1>
-          <p className="subtitle">Haberleri sürükleyin, yapıştırın veya karşılaştırın. Dezenformasyonla mücadele için yapay zeka desteği.</p>
+          <div className="header-badge">{badgeText}</div>
+          <h1 className="main-title">{siteTitle}</h1>
+          <p className="subtitle">
+            Haberleri ve makaleleri yapıştırın veya karşılaştırın.
+            Dezenformasyonla mücadele için yapay zeka desteği.
+          </p>
 
           <div className="mode-toggle">
-            <button className={`mode-btn ${mod === 'single' ? 'active' : ''}`} onClick={() => setMod('single')}>
-              <Link2 size={18} /> Tekli Kontrol
+            <button className={`mode-btn ${mod === 'single' ? 'active' : ''}`} onClick={() => { setModState('single'); setSonuc(null); setCompareResults([]); }}>
+              🔗 Tekli Kontrol
             </button>
-            <button className={`mode-btn ${mod === 'compare' ? 'active' : ''}`} onClick={() => setMod('compare')}>
-              <TrendingUp size={18} /> Karşılaştır
+            <button className={`mode-btn ${mod === 'compare' ? 'active' : ''}`} onClick={() => { setModState('compare'); setSonuc(null); setCompareResults([]); }}>
+              📊 Karşılaştır
             </button>
-            <button className={`mode-btn ${gecmisGoster ? 'active' : ''}`} onClick={() => setGecmisGoster(!gecmisGoster)}>
-              <History size={18} /> Geçmiş <span className="gecmis-badge">{gecmis.length}</span>
+            <button className={`mode-btn ${gecmisOpen ? 'active' : ''}`} onClick={() => { setGecmisOpen(!gecmisOpen); setSettingsOpen(false); }}>
+              🕐 Geçmiş <span className="gecmis-badge">{gecmis.length}</span>
+            </button>
+            <button className={`mode-btn ${settingsOpen ? 'active' : ''}`} onClick={() => { setSettingsOpen(!settingsOpen); setGecmisOpen(false); }}>
+              ⚙️ Ayarlar
             </button>
           </div>
         </header>
 
-        {/* ── Geçmiş ── */}
-        {gecmisGoster && (
+        {/* ── Ayarlar Paneli ── */}
+        {settingsOpen && (
+          <div className="settings-panel">
+            <div className="settings-header">
+              <span className="settings-title">⚙ Kişisel Ayarlar</span>
+              <button className="history-close-btn" onClick={() => setSettingsOpen(false)}>✕</button>
+            </div>
+
+            <div className="settings-grid">
+              {/* API Key */}
+              <div className="settings-section full-width">
+                <span className="settings-label">🔑 Anthropic API Anahtarı</span>
+                <div className="api-key-row">
+                  <input
+                    className="settings-input"
+                    type={keyVisible ? 'text' : 'password'}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="sk-ant-api03-..."
+                    autoComplete="off"
+                  />
+                  <button className="toggle-key-btn" onClick={() => setKeyVisible(!keyVisible)}>
+                    {keyVisible ? '🔒' : '👁'}
+                  </button>
+                </div>
+                <div className={`api-key-status ${isApiActive ? 'ok' : 'empty'}`}>
+                  {isApiActive
+                    ? '✓ API anahtarı aktif — gerçek analiz modu'
+                    : apiKey
+                    ? '⚠ Geçersiz format (sk-ant... ile başlamalı)'
+                    : '— API anahtarı girilmedi, demo mod aktif'}
+                </div>
+                <div className="api-key-note">
+                  Anthropic Console'dan edinebilirsiniz:{' '}
+                  <a href="https://console.anthropic.com" target="_blank" rel="noreferrer">
+                    console.anthropic.com
+                  </a>
+                  {' '}— Anahtar yalnızca tarayıcınızda saklanır.
+                </div>
+              </div>
+
+              {/* Model */}
+              <div className="settings-section">
+                <span className="settings-label">🤖 Model</span>
+                <select className="model-select" value={model} onChange={(e) => setModel(e.target.value)}>
+                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Önerilen)</option>
+                  <option value="claude-opus-4-20250514">Claude Opus 4 (En Güçlü)</option>
+                  <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Hızlı)</option>
+                </select>
+              </div>
+
+              {/* Dil */}
+              <div className="settings-section">
+                <span className="settings-label">🌐 Yanıt Dili</span>
+                <div className="option-group">
+                  {[['tr','🇹🇷 Türkçe'], ['en','🇬🇧 English'], ['ar','🇸🇦 العربية']].map(([code, label]) => (
+                    <button key={code} className={`option-btn ${lang === code ? 'selected' : ''}`} onClick={() => setLang(code)}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Analiz Derinliği */}
+              <div className="settings-section">
+                <span className="settings-label">🔬 Analiz Modu</span>
+                <div className="option-group">
+                  {[['normal','Normal'], ['deep','Derin'], ['fast','Hızlı']].map(([key, label]) => (
+                    <button key={key} className={`option-btn ${depth === key ? 'selected' : ''}`} onClick={() => setDepth(key)}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Yazı Tipi */}
+              <div className="settings-section">
+                <span className="settings-label">✍ Yazı Tipi</span>
+                <div className="option-group">
+                  {[['Georgia, serif','Georgia'], ['system-ui, sans-serif','System'], ['monospace','Mono']].map(([f, label]) => (
+                    <button key={f} className={`option-btn ${font === f ? 'selected' : ''}`} style={{ fontFamily: f }} onClick={() => setFont(f)}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Vurgu Rengi */}
+              <div className="settings-section">
+                <span className="settings-label">🎨 Vurgu Rengi</span>
+                <div className="color-options">
+                  {['#dc2626','#7c3aed','#0891b2','#059669','#d97706'].map((c) => (
+                    <div
+                      key={c}
+                      className={`color-dot ${accent === c ? 'selected' : ''}`}
+                      style={{ background: c }}
+                      onClick={() => setAccent(c)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Site Başlığı */}
+              <div className="settings-section">
+                <span className="settings-label">📌 Site Başlığı</span>
+                <input
+                  className="settings-input"
+                  type="text"
+                  value={siteTitle}
+                  onChange={(e) => setSiteTitle(e.target.value)}
+                  placeholder="Yalan mıyız?"
+                />
+              </div>
+
+              {/* Rozet */}
+              <div className="settings-section">
+                <span className="settings-label">🏷 Rozet Yazısı</span>
+                <input
+                  className="settings-input"
+                  type="text"
+                  value={badgeText}
+                  onChange={(e) => setBadgeText(e.target.value)}
+                  placeholder="DOĞRULUK KONTROLÜ SİSTEMİ"
+                />
+              </div>
+            </div>
+
+            <hr className="settings-divider" />
+
+            <div className="settings-actions">
+              <button className="settings-save-btn" onClick={handleSaveSettings}>💾 Kaydet</button>
+              <button className="settings-reset-btn" onClick={handleResetSettings}>Sıfırla</button>
+              <span className={`settings-save-confirm ${saveConfirm ? 'show' : ''}`}>✓ Kaydedildi</span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Geçmiş Paneli ── */}
+        {gecmisOpen && (
           <div className="history-panel">
             <div className="history-header">
               <h3 className="history-title">Son Kontroller</h3>
-              <button className="history-close-btn" onClick={() => setGecmisGoster(false)}>
-                <ChevronUp size={20} />
-              </button>
+              <button className="history-close-btn" onClick={() => setGecmisOpen(false)}>▲</button>
             </div>
             {gecmis.length === 0 ? (
-              <p className="history-empty">Henüz kontrol edilmiş haber yok</p>
+              <p className="history-empty">Henüz kontrol edilmiş içerik yok</p>
             ) : (
               <div className="history-list">
                 {gecmis.map((item) => (
                   <div key={item.id} className="history-item">
                     <div className="history-item-header">
-                      <div
-                        className="history-badge"
-                        style={{ background: DURUM_CONFIG[item.sonuc.durum].color }}
-                      >
+                      <div className="history-badge" style={{ background: DURUM_CONFIG[item.sonuc.durum].color }}>
                         {DURUM_CONFIG[item.sonuc.durum].emoji}
                       </div>
                       <div className="history-item-info">
-                        <p className="history-item-link">{item.link.slice(0, 50)}…</p>
-                        <p className="history-item-time">
-                          {new Date(item.timestamp).toLocaleDateString('tr-TR')}
-                        </p>
+                        <p className="history-item-link">{item.link.slice(0, 55)}…</p>
+                        <p className="history-item-time">{new Date(item.timestamp).toLocaleDateString('tr-TR')}</p>
                       </div>
                       <div className="history-item-actions">
-                        <button
-                          className="history-action-btn"
-                          title="Görüntüle"
-                          onClick={() => { setLink(item.link); setSonuc(item.sonuc); setMod('single'); setGecmisGoster(false); }}
-                        >
-                          <Eye size={16} />
-                        </button>
-                        <button
-                          className="history-action-btn"
-                          title="Sil"
-                          onClick={() => deleteFromGecmis(item.id)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <button className="history-action-btn" title="Görüntüle" onClick={() => loadFromGecmis(item)}>👁</button>
+                        <button className="history-action-btn" title="Sil" onClick={() => deleteFromGecmis(item.id)}>🗑</button>
                       </div>
                     </div>
                   </div>
@@ -288,12 +535,24 @@ ${notlar ? `Ek Notlar: ${notlar}` : ''}`;
 
         {/* ── Form ── */}
         <div className="form-card">
-          {mod === 'single' ? (
+          {/* API uyarısı */}
+          {!isApiActive && (
+            <div className="no-api-warning">
+              <span style={{ fontSize: 20 }}>⚠️</span>
+              <span className="no-api-warning-text">
+                Demo moddasınız — gerçek analiz için{' '}
+                <span className="no-api-warning-link" onClick={() => { setSettingsOpen(true); setGecmisOpen(false); }}>
+                  API anahtarı ekleyin
+                </span>.
+              </span>
+            </div>
+          )}
+
+          {/* Tekli mod */}
+          {mod === 'single' && (
             <>
               <div className="input-group">
-                <label className="input-label">
-                  <Link2 size={20} /> Haber Linki
-                </label>
+                <label className="input-label">🔗 Haber veya Makale Linki</label>
                 <input
                   type="url"
                   className="input-field"
@@ -305,42 +564,43 @@ ${notlar ? `Ek Notlar: ${notlar}` : ''}`;
               </div>
               <div className="input-group">
                 <label className="input-label">
-                  <FileText size={20} /> Ek Notlar <span className="input-label-opt">(Opsiyonel)</span>
+                  📄 Ek Notlar <span className="input-label-opt">(Opsiyonel)</span>
                 </label>
                 <textarea
                   className="textarea-field"
                   value={notlar}
                   onChange={(e) => setNotlar(e.target.value)}
-                  placeholder="Kontrol edilmesini istediğiniz özel noktalar..."
-                  rows="3"
+                  placeholder="Kontrol edilmesini istediğiniz özel noktalar, iddia edilen bilgiler..."
+                  rows={3}
                   disabled={yukleniyor}
                 />
               </div>
             </>
-          ) : (
+          )}
+
+          {/* Karşılaştırma modu */}
+          {mod === 'compare' && (
             <div>
-              <p className="compare-label">Karşılaştırmak istediğiniz haber linklerini girin:</p>
-              {links.map((l, i) => (
+              <p className="compare-label">Karşılaştırmak istediğiniz linkleri girin:</p>
+              {compareLinks.map((l, i) => (
                 <div key={i} className="compare-link-group">
                   <span className="compare-link-number">{i + 1}</span>
                   <input
                     type="url"
                     className="compare-input"
                     value={l}
-                    onChange={(e) => updateLink(i, e.target.value)}
-                    placeholder="https://www.ornek-haber.com/haber-basligi"
+                    onChange={(e) => updateCompareLink(i, e.target.value)}
+                    placeholder="https://..."
                     disabled={yukleniyor}
                   />
-                  {links.length > 2 && (
-                    <button className="remove-btn" onClick={() => removeLink(i)} disabled={yukleniyor}>
-                      <X size={18} />
-                    </button>
+                  {compareLinks.length > 2 && (
+                    <button className="remove-btn" onClick={() => removeCompareLink(i)} disabled={yukleniyor}>✕</button>
                   )}
                 </div>
               ))}
-              {links.length < 5 && (
+              {compareLinks.length < 5 && (
                 <button className="add-link-btn" onClick={addLinkField} disabled={yukleniyor}>
-                  <Plus size={18} /> Kaynak Ekle
+                  + Kaynak Ekle
                 </button>
               )}
             </div>
@@ -348,9 +608,12 @@ ${notlar ? `Ek Notlar: ${notlar}` : ''}`;
 
           <button className="submit-btn" onClick={haberiKontrolEt} disabled={isSubmitDisabled}>
             {yukleniyor ? (
-              <div className="loading-content"><Loader2 size={20} className="spinning" /> <span className="loading-text">Analiz Ediliyor...</span></div>
+              <span className="loading-content">
+                <span className="spinning">⟳</span>
+                <span className="loading-text">Analiz ediliyor...</span>
+              </span>
             ) : (
-              <><CheckCircle2 size={20} /> {mod === 'single' ? 'DOĞRULUĞU ANALİZ ET' : 'KAYNAKLARI KARŞILAŞTIR'}</>
+              mod === 'single' ? '✓ DOĞRULUĞU ANALİZ ET' : '📊 KAYNAKLARI KARŞILAŞTIR'
             )}
           </button>
         </div>
@@ -358,18 +621,13 @@ ${notlar ? `Ek Notlar: ${notlar}` : ''}`;
         {/* ── Tekli Sonuç ── */}
         {mod === 'single' && sonuc && (() => {
           const cfg = DURUM_CONFIG[sonuc.durum];
-          const Icon = cfg.icon;
           return (
             <div className="result-card">
               <div className="result-header">
-                <div className={`result-icon ${sonuc.durum}`}>
-                  <Icon size={32} color="currentColor" />
-                </div>
+                <div className={`result-icon ${sonuc.durum}`}>{cfg.emoji}</div>
                 <div className="result-title-wrapper">
                   <h2 className="result-title">Doğrulama Sonucu</h2>
-                  <div className={`result-badge ${sonuc.durum}`}>
-                    {cfg.emoji} {cfg.label}
-                  </div>
+                  <div className={`result-badge ${sonuc.durum}`}>{cfg.emoji} {cfg.label}</div>
                 </div>
               </div>
 
@@ -377,43 +635,32 @@ ${notlar ? `Ek Notlar: ${notlar}` : ''}`;
                 <div className="result-text">{sonuc.icerik}</div>
               </div>
 
-              {/* Paylaşım Butonları */}
               <div className="share-actions">
-                <button className="share-btn x-btn" onClick={() => shareToSocial('twitter')}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 22.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-                  </svg>
-                  X'te Paylaş
-                </button>
-                <button className="share-btn wa-btn" onClick={() => shareToSocial('whatsapp')}>
-                  <MessageCircle size={16} /> WhatsApp
-                </button>
-                <button className="share-btn copy-link-btn" onClick={copyToClipboard}>
-                  {kopyalandi ? <Check size={16} color="#10b981" /> : <Link2 size={16} />}
-                  {kopyalandi ? 'Kopyalandı' : 'Bağlantıyı Kopyala'}
+                <button className="share-btn x-btn" onClick={() => shareToSocial('twitter')}>𝕏 X'te Paylaş</button>
+                <button className="share-btn wa-btn" onClick={() => shareToSocial('whatsapp')}>💬 WhatsApp</button>
+                <button className="share-btn copy-link-btn" onClick={copyLink}>
+                  {kopyalandi ? '✓ Kopyalandı' : '🔗 Bağlantıyı Kopyala'}
                 </button>
               </div>
 
               <button className="reset-btn" onClick={() => { setSonuc(null); setLink(''); setNotlar(''); }}>
-                Yeni Haber Kontrol Et
+                + Yeni İçerik Kontrol Et
               </button>
             </div>
           );
         })()}
 
         {/* ── Karşılaştırma Sonuçları ── */}
-        {mod === 'compare' && sonuclar.length > 0 && (
+        {mod === 'compare' && compareResults.length > 0 && (
           <div className="compare-results">
             <h2 className="compare-results-title">Karşılaştırma Sonuçları</h2>
             <div className="compare-grid">
-              {sonuclar.map((result, i) => {
+              {compareResults.map((result, i) => {
                 const cfg = DURUM_CONFIG[result.durum];
                 return (
                   <div key={i} className="compare-card">
                     <div className="compare-card-header">
-                      <div className="compare-card-badge" style={{ background: cfg.color }}>
-                        {cfg.emoji}
-                      </div>
+                      <div className="compare-card-badge" style={{ background: cfg.color }}>{cfg.emoji}</div>
                       <div>
                         <span className="compare-card-number">Kaynak {i + 1}</span>
                         <div className="compare-card-verdict" style={{ color: cfg.color }}>{cfg.label}</div>
@@ -425,16 +672,15 @@ ${notlar ? `Ek Notlar: ${notlar}` : ''}`;
                 );
               })}
             </div>
-            <button className="reset-btn" onClick={() => { setSonuclar([]); setLinks(['', '']); }}>
-              Yeni Karşılaştırma Yap
+            <button className="reset-btn" onClick={() => { setCompareResults([]); setCompareLinks(['', '']); }}>
+              + Yeni Karşılaştırma Yap
             </button>
           </div>
         )}
 
-        {/* ── Footer ── */}
         <footer className="footer">
-          <p>Yapay zeka destekli haber doğrulama sistemi</p>
-          <p className="footer-small">v1.0.0 (Demo Mode)</p>
+          <p>Yapay zeka destekli haber ve makale doğrulama sistemi</p>
+          <p className="footer-small">v2.0 — Anthropic Claude</p>
         </footer>
 
       </div>
