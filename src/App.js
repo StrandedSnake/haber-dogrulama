@@ -33,7 +33,7 @@ import {
 // ─── Ana Bileşen ──────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [mod, setMod]                   = useState('single');
+  const [mod, setMod]                   = useState('pipeline');
   const [link, setLink]                 = useState('');
   const [notlar, setNotlar]             = useState('');
   const [compareLinks, setCompareLinks] = useState(['', '']);
@@ -100,20 +100,15 @@ export default function App() {
           <div className="header-badge">{settings.badgeText}</div>
           <h1 className="main-title">{settings.siteTitle}</h1>
           <p className="subtitle">
-            Haberleri ve makaleleri yapıştırın veya karşılaştırın.
-            Dezenformasyonla mücadele için yapay zeka desteği.
+            Bilimsel haberleri ve iddiaları doğrulama ve
+            dezenformasyonla mücadele için yapay zeka desteği.
           </p>
 
           <nav className="mode-toggle" aria-label="Mod seçimi">
-            <button className={`mode-btn ${mod === 'single'   ? 'active' : ''}`} onClick={() => switchMod('single')}>
-              🔗 Tekli Kontrol
-            </button>
-            <button className={`mode-btn ${mod === 'compare'  ? 'active' : ''}`} onClick={() => switchMod('compare')}>
-              📊 Karşılaştır
-            </button>
             <button className={`mode-btn ${mod === 'pipeline' ? 'active' : ''}`} onClick={() => switchMod('pipeline')}>
-              ⬡ Pipeline
+              ⬡ Doğrulama
             </button>
+
             <button
               className={`mode-btn ${panels.isOpen('gecmis') ? 'active' : ''}`}
               onClick={() => panels.toggle('gecmis')}
@@ -197,7 +192,6 @@ export default function App() {
 
         <footer className="footer">
           <p>Yapay zeka destekli haber ve makale doğrulama sistemi</p>
-          <p className="footer-small">v3.0 — Anthropic Claude</p>
         </footer>
 
       </div>
@@ -308,7 +302,7 @@ function SettingsPanel({
 
         <div className="settings-section">
           <span className="settings-label">📌 Site Başlığı</span>
-          <input className="settings-input" type="text" value={settings.siteTitle} onChange={(e) => update({ siteTitle: e.target.value })} placeholder="Yalan mıyız?" />
+          <input className="settings-input" type="text" value={settings.siteTitle} onChange={(e) => update({ siteTitle: e.target.value })} placeholder="Doğrula" />
         </div>
 
         <div className="settings-section">

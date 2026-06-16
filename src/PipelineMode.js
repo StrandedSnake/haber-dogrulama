@@ -5,7 +5,8 @@ import { useState, useCallback } from 'react';
 
 // ─── Demo Verisi ──────────────────────────────────────────────────────────────
 
-const API_ENDPOINT = "http://localhost:5000/fact-check";
+const API_ENDPOINT_FACT_CHECK = "http://localhost:5000/fact-check";
+const API_ENDPOINT_FACT_CHECK_SINGLE = "http://localhost:5000/fact-check-single";
 console.log("PipelineMode.jsx dosyası yüklendi");
 
 const PIPELINE_DEMO = {
@@ -17,7 +18,7 @@ const PIPELINE_DEMO = {
       passages: [
         {
           title: "AFAD açıklaması",
-          oa_link: "https://example.com",
+          url: "https://example.com",
           passage: "AFAD açıklamasına göre depremin büyüklüğü 6.8 olarak ölçülmüştür.",
           deduction: "REFUTES",
         },
@@ -37,6 +38,15 @@ const PIPELINE_DEMO = {
 // ─── ClaimCard ────────────────────────────────────────────────────────────────
 // Not: Önceki versiyonda PipelineMode içinde tanımlanıyordu →
 // her render'da yeniden oluşturuluyordu. Dışarı alınarak sabitlendi.
+
+function isHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
 
 function getClaimText(item, isNew) {
   if (item.claim) return item.claim;
@@ -65,21 +75,103 @@ function PassageItem({ passage }) {
         </div>
       )}
 
-      {passage.deduction && (
-        <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
-          Sonuç: {passage.deduction}
-        </div>
-      )}
+    {passage.deduction && (
+      <div className={`deduction-badge ${getDeductionClass(passage.deduction)}`}>
+        Sonuç: {formatDeduction(passage.deduction)}
+      </div>
+    )}
 
-      {passage.oa_link && (
+    <PassageScores passage={passage} />
+
+      {passage.url && (
         <a
-          href={passage.oa_link}
+          href={passage.url}
           target="_blank"
           rel="noreferrer"
           className="pipeline-link-pill"
         >
-          {passage.oa_link}
+          {passage.url}
         </a>
+      )}
+    </div>
+  );
+}
+
+function getMainEvidenceScore(passage) {
+  if (passage.passage_score_reranked !== null && passage.passage_score_reranked !== undefined) {
+    return {
+      label: 'Kanıt skoru',
+      value: passage.passage_score_reranked,
+      type: 'Cross-encoder'
+    };
+  }
+
+  if (passage.passage_score !== null && passage.passage_score !== undefined) {
+    return {
+      label: 'Kanıt skoru',
+      value: passage.passage_score,
+      type: 'Cosine'
+    };
+  }
+
+  return null;
+}
+
+function getDeductionClass(deduction) {
+  if (!deduction) return "deduction-neutral";
+
+  const label = deduction.toUpperCase();
+
+  if (label === "SUPPORTS") return "deduction-supports";
+  if (label === "CONTRADICTS") return "deduction-contradicts";
+  if (label === "NOT_ENOUGH_INFO") return "deduction-not-enough";
+
+  return "deduction-neutral";
+}
+
+function formatDeduction(deduction) {
+  if (!deduction) return "";
+
+  const label = deduction.toUpperCase();
+
+  if (label === "SUPPORTS") return "Destekliyor";
+  if (label === "CONTRADICTS") return "Çelişiyor";
+  if (label === "NOT_ENOUGH_INFO") return "Yetersiz Kanıt";
+
+  return deduction;
+}
+
+function PassageScores({ passage }) {
+  const mainScore = getMainEvidenceScore(passage);
+
+  const docScore = passage.doc_score;
+  const docRerankScore = passage.doc_score_reranked;
+  const passageScore = passage.passage_score;
+  const passageRerankScore = passage.passage_score_reranked;
+
+  if (!mainScore && !docScore && !docRerankScore && !passageScore && !passageRerankScore) {
+    return null;
+  }
+
+  return (
+    <div className="pipeline-score-row">
+      {mainScore && (
+        <span className="pipeline-score-pill primary">
+          {mainScore.label}: {mainScore.value}
+          <span className="pipeline-score-type"> {mainScore.type}</span>
+        </span>
+      )}
+
+      {docRerankScore && (
+        <span className="pipeline-score-pill">
+          Doküman: {docRerankScore}
+        </span>
+      )}
+
+      {!docRerankScore && docScore && (
+        <span className="pipeline-score-pill">
+          Doküman: {docScore}
+        </span>
       )}
     </div>
   );
@@ -173,7 +265,7 @@ function ClaimCard({ item, cardKey, isOpen, onToggle }) {
 }
 
 function PipelineMode() {
-  const [pipelineUrl, setPipelineUrl] = useState('');
+  const [pipelineInput, setPipelineInput] = useState('');
   const [yukleniyor, setYukleniyor] = useState(false);
   const [hata, setHata] = useState('');
   const [veri, setVeri] = useState(null);
@@ -185,34 +277,28 @@ function PipelineMode() {
   );
 
   const veriGetir = async () => {
-    const url = pipelineUrl.trim();
+    const input = pipelineInput.trim();
 
-    if (!url) {
-      setHata('Lütfen kontrol edilecek haber URL adresini girin.');
+    if (!input) {
+      setHata('Lütfen kontrol edilecek haber URL adresini veya iddia metnini girin.');
       return;
     }
 
-    try {
-      const parsed = new URL(url);
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
-        setHata('Lütfen geçerli bir http/https URL girin.');
-        return;
-      }
-    } catch {
-      setHata('Lütfen geçerli bir URL girin.');
-      return;
-    }
+    const inputIsUrl = isHttpUrl(input);
+
+    const endpoint = inputIsUrl
+      ? API_ENDPOINT_FACT_CHECK
+      : API_ENDPOINT_FACT_CHECK_SINGLE;
 
     setHata('');
     setYukleniyor(true);
     setVeri(null);
 
-
     try {
-      const res = await fetch(API_ENDPOINT, {
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json',},
-        body: JSON.stringify({ claim: url }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claim: input }),
       });
 
       if (!res.ok) {
@@ -224,7 +310,7 @@ function PipelineMode() {
       setVeri(data);
       setAciklar({});
     } catch (e) {
-      setHata('Veri alınamadı: ' + e);
+      setHata('Veri alınamadı: ' + e.message);
     } finally {
       setYukleniyor(false);
     }
@@ -236,7 +322,7 @@ function PipelineMode() {
 
   const handleReset = () => {
     setVeri(null);
-    setPipelineUrl('');
+    setPipelineInput('');
     setHata('');
     setAciklar({});
   };
@@ -245,17 +331,23 @@ function PipelineMode() {
     <div>
       <div className="form-card">
         <div className="input-group">
-          <label className="input-label">⬡ Haber URL</label>
+          <label className="input-label">⬡ Haber URL veya İddia Metni</label>
 
           <div style={{ display: 'flex', gap: 12 }}>
-            <input
-              type="url"
+            <textarea
               className="input-field"
-              value={pipelineUrl}
-              onChange={(e) => setPipelineUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !yukleniyor && veriGetir()}
-              placeholder="https://www.ornek-haber.com/haber-basligi"
+              style={{ resize: 'none' }}
+              value={pipelineInput}
+              onChange={(e) => setPipelineInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !yukleniyor) {
+                  e.preventDefault();
+                  veriGetir();
+                }
+              }}
+              placeholder="Haber URL'si veya kontrol edilecek tek bir iddia girin..."
               disabled={yukleniyor}
+              rows={1}
             />
 
             <button
