@@ -81,7 +81,7 @@ function PassageItem({ passage }) {
       </div>
     )}
 
-    <PassageScores passage={passage} />
+    {/* <PassageScores passage={passage} /> */}
 
       {passage.url && (
         <a

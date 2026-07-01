@@ -302,7 +302,7 @@ function SettingsPanel({
 
         <div className="settings-section">
           <span className="settings-label">📌 Site Başlığı</span>
-          <input className="settings-input" type="text" value={settings.siteTitle} onChange={(e) => update({ siteTitle: e.target.value })} placeholder="Doğrula" />
+          <input className="settings-input" type="text" value={settings.siteTitle} onChange={(e) => update({ siteTitle: e.target.value })} placeholder="Yalan mıyız?" />
         </div>
 
         <div className="settings-section">
